@@ -67,11 +67,6 @@
 /* Command Line Options */
 int	dflag;					/* detached, no stdin */
 unsigned int iflag;				/* Interval Flag */
-#ifdef ANDROID
-int	jflag = 0;
-#else
-int	jflag;					/* use jumbo frames if we can */
-#endif /* !ANDROID */
 int	kflag;					/* More than one connect */
 int	lflag;					/* Bind to local port */
 int	nflag;					/* Don't do name look up */
@@ -82,18 +77,10 @@ char   *sflag;					/* Source Address */
 int	tflag;					/* Telnet Emulation */
 int	uflag;					/* UDP - Default to TCP */
 int	vflag;					/* Verbosity */
-#ifndef ANDROID
-int	xflag;					/* Socks proxy */
-#endif /* !ANDROID */
 int	zflag;					/* Port Scan Flag */
 int	Dflag;					/* sodebug */
 int	Iflag;					/* TCP receive buffer size */
 int	Oflag;					/* TCP send buffer size */
-#ifndef ANDROID
-int	Sflag;					/* TCP MD5 signature option */
-int	Tflag = -1;				/* IP Type of Service */
-u_int	rtableid;
-#endif /* !ANDROID */
 
 int timeout = -1;
 int family = AF_UNSPEC;
@@ -107,10 +94,10 @@ int	local_listen(char *, char *, struct addrinfo);
 void	readwrite(int);
 int	remote_connect(const char *, const char *, struct addrinfo);
 int	timeout_connect(int, const struct sockaddr *, socklen_t);
-#ifndef ANDROID
+#if 0
 int	socks_connect(const char *, const char *, struct addrinfo,
 	    const char *, const char *, struct addrinfo, int, const char *);
-#endif /* !ANDROID */
+#endif
 int	udptest(int);
 int	unix_bind(char *);
 int	unix_connect(char *);
@@ -122,20 +109,15 @@ void	usage(int);
 int
 main(int argc, char *argv[])
 {
-	int ch, s, ret, socksv;
+	int ch, s, ret;
 	char *host, *uport;
 	struct addrinfo hints;
 	struct servent *sv;
 	socklen_t len;
 	struct sockaddr_storage cliaddr;
-	char *proxy;
-	const char *errstr, *proxyhost = "", *proxyport = NULL;
-	struct addrinfo proxyhints;
-	char unix_dg_tmp_socket_buf[UNIX_DG_TMP_SOCKET_SIZE];
 
 	ret = 1;
 	s = 0;
-	socksv = 5;
 	host = NULL;
 	uport = NULL;
 	sv = NULL;
@@ -152,16 +134,6 @@ main(int argc, char *argv[])
 		case 'U':
 			family = AF_UNIX;
 			break;
-		case 'X':
-			if (strcasecmp(optarg, "connect") == 0)
-				socksv = -1; /* HTTP proxy CONNECT */
-			else if (strcmp(optarg, "4") == 0)
-				socksv = 4; /* SOCKS v.4 */
-			else if (strcmp(optarg, "5") == 0)
-				socksv = 5; /* SOCKS v.5 */
-			else
-				errx(1, "unsupported proxy protocol");
-			break;
 		case 'd':
 			dflag = 1;
 			break;
@@ -169,19 +141,8 @@ main(int argc, char *argv[])
 			help();
 			break;
 		case 'i':
-#ifdef ANDROID
 			iflag = atoi(optarg);
-#else
-			iflag = strtonum(optarg, 0, UINT_MAX, &errstr);
-			if (errstr)
-				errx(1, "interval %s: %s", errstr, optarg);
-#endif /* ANDROID */
 			break;
-#ifndef ANDROID
-		case 'j':
-			jflag = 1;
-			break;
-#endif /* !ANDROID */
 		case 'k':
 			kflag = 1;
 			break;
@@ -209,34 +170,13 @@ main(int argc, char *argv[])
 		case 'u':
 			uflag = 1;
 			break;
-#ifndef ANDROID
-		case 'V':
-			rtableid = (unsigned int)strtonum(optarg, 0,
-			    RT_TABLEID_MAX, &errstr);
-			if (errstr)
-				errx(1, "rtable %s: %s", errstr, optarg);
-			break;
-#endif /* !ANDROID */
 		case 'v':
 			vflag = 1;
 			break;
 		case 'w':
-#ifdef ANDROID
 			timeout = atoi(optarg);
-#else
-			timeout = strtonum(optarg, 0, INT_MAX / 1000, &errstr);
-			if (errstr)
-				errx(1, "timeout %s: %s", errstr, optarg);
-#endif
 			timeout *= 1000;
 			break;
-#ifndef ANDROID
-		case 'x':
-			xflag = 1;
-			if ((proxy = strdup(optarg)) == NULL)
-				err(1, NULL);
-			break;
-#endif /* !ANDROID */
 		case 'z':
 			zflag = 1;
 			break;
@@ -244,44 +184,11 @@ main(int argc, char *argv[])
 			Dflag = 1;
 			break;
 		case 'I':
-#ifdef ANDROID
 			Iflag = atoi(optarg);
-#else
-			Iflag = strtonum(optarg, 1, 65536 << 14, &errstr);
-			if (errstr != NULL)
-				errx(1, "TCP receive window %s: %s",
-				    errstr, optarg);
-#endif
 			break;
 		case 'O':
-#ifdef ANDROID
 			Oflag = atoi(optarg);
-#else
-			Oflag = strtonum(optarg, 1, 65536 << 14, &errstr);
-			if (errstr != NULL)
-				errx(1, "TCP send window %s: %s",
-				    errstr, optarg);
-#endif
 			break;
-#ifndef ANDROID
-		case 'S':
-			Sflag = 1;
-			break;
-		case 'T':
-			errstr = NULL;
-			errno = 0;
-			if (map_tos(optarg, &Tflag))
-				break;
-			if (strlen(optarg) > 1 && optarg[0] == '0' &&
-			    optarg[1] == 'x')
-				Tflag = (int)strtol(optarg, NULL, 16);
-			else
-				Tflag = (int)strtonum(optarg, 0, 255,
-				    &errstr);
-			if (Tflag < 0 || Tflag > 255 || errstr || errno)
-				errx(1, "illegal tos value %s", optarg);
-			break;
-#endif /* !ANDROID */
 		default:
 			usage(1);
 		}
@@ -317,12 +224,6 @@ main(int argc, char *argv[])
 	if ((family == AF_UNIX) && uflag && !lflag) {
 		if (sflag) {
 			unix_dg_tmp_socket = sflag;
-		} else {
-			strlcpy(unix_dg_tmp_socket_buf, "/tmp/nc.XXXXXXXXXX",
-				UNIX_DG_TMP_SOCKET_SIZE);
-			if (mktemp(unix_dg_tmp_socket_buf) == NULL)
-				err(1, "mktemp");
-			unix_dg_tmp_socket = unix_dg_tmp_socket_buf;
 		}
 	}
 
@@ -335,36 +236,6 @@ main(int argc, char *argv[])
 		if (nflag)
 			hints.ai_flags |= AI_NUMERICHOST;
 	}
-
-#ifndef ANDROID
-	if (xflag) {
-		if (uflag)
-			errx(1, "no proxy support for UDP mode");
-
-		if (lflag)
-			errx(1, "no proxy support for listen");
-
-		if (family == AF_UNIX)
-			errx(1, "no proxy support for unix sockets");
-
-		/* XXX IPv6 transport to proxy would probably work */
-		if (family == AF_INET6)
-			errx(1, "no proxy support for IPv6");
-
-		if (sflag)
-			errx(1, "no proxy support for local source address");
-
-		proxyhost = strsep(&proxy, ":");
-		proxyport = proxy;
-
-		memset(&proxyhints, 0, sizeof(struct addrinfo));
-		proxyhints.ai_family = family;
-		proxyhints.ai_socktype = SOCK_STREAM;
-		proxyhints.ai_protocol = IPPROTO_TCP;
-		if (nflag)
-			proxyhints.ai_flags |= AI_NUMERICHOST;
-	}
-#endif /* !ANDROID */
 
 	if (lflag) {
 		int connfd;
@@ -394,7 +265,7 @@ main(int argc, char *argv[])
 				struct sockaddr_storage z;
 
 				len = sizeof(z);
-				plen = jflag ? 16384 : 2048;
+				plen = 2048;
 				rv = recvfrom(s, buf, plen, MSG_PEEK,
 				    (struct sockaddr *)&z, &len);
 				if (rv < 0)
@@ -447,13 +318,6 @@ main(int argc, char *argv[])
 			if (s)
 				close(s);
 
-#ifndef ANDROID
-			if (xflag)
-				s = socks_connect(host, portlist[i], hints,
-				    proxyhost, proxyport, proxyhints, socksv,
-				    Pflag);
-			else
-#endif /* !ANDROID */
 				s = remote_connect(host, portlist[i], hints);
 
 			if (s < 0)
@@ -513,12 +377,7 @@ unix_bind(char *path)
 	memset(&sun, 0, sizeof(struct sockaddr_un));
 	sun.sun_family = AF_UNIX;
 
-	if (strlcpy(sun.sun_path, path, sizeof(sun.sun_path)) >=
-	    sizeof(sun.sun_path)) {
-		close(s);
-		errno = ENAMETOOLONG;
-		return (-1);
-	}
+	strncpy(sun.sun_path, path, sizeof(sun.sun_path));
 
 	if (bind(s, (struct sockaddr *)&sun, SUN_LEN(&sun)) < 0) {
 		close(s);
@@ -549,12 +408,7 @@ unix_connect(char *path)
 	memset(&sun, 0, sizeof(struct sockaddr_un));
 	sun.sun_family = AF_UNIX;
 
-	if (strlcpy(sun.sun_path, path, sizeof(sun.sun_path)) >=
-	    sizeof(sun.sun_path)) {
-		close(s);
-		errno = ENAMETOOLONG;
-		return (-1);
-	}
+	strncpy( sun.sun_path, path, sizeof(sun.sun_path) );
 	if (connect(s, (struct sockaddr *)&sun, SUN_LEN(&sun)) < 0) {
 		close(s);
 		return (-1);
@@ -590,7 +444,7 @@ int
 remote_connect(const char *host, const char *port, struct addrinfo hints)
 {
 	struct addrinfo *res, *res0;
-	int s, error, on = 1;
+	int s, error;
 
 	if ((error = getaddrinfo(host, port, &hints, &res)))
 		errx(1, "getaddrinfo: %s", gai_strerror(error));
@@ -601,22 +455,11 @@ remote_connect(const char *host, const char *port, struct addrinfo hints)
 		    res0->ai_protocol)) < 0)
 			continue;
 
-#ifndef ANDROID
-		if (rtableid) {
-			if (setsockopt(s, SOL_SOCKET, SO_RTABLE, &rtableid,
-			    sizeof(rtableid)) == -1)
-				err(1, "setsockopt SO_RTABLE");
-		}
-#endif /* !ANDROID */
 
 		/* Bind to a local port or source address if specified. */
 		if (sflag || pflag) {
 			struct addrinfo ahints, *ares;
 
-#ifndef ANDROID
-			/* try SO_BINDANY, but don't insist */
-			setsockopt(s, SOL_SOCKET, SO_BINDANY, &on, sizeof(on));
-#endif /* !ANDROID */
 			memset(&ahints, 0, sizeof(struct addrinfo));
 			ahints.ai_family = res0->ai_family;
 			ahints.ai_socktype = uflag ? SOCK_DGRAM : SOCK_STREAM;
@@ -716,14 +559,6 @@ local_listen(char *host, char *port, struct addrinfo hints)
 		    res0->ai_protocol)) < 0)
 			continue;
 
-#ifndef ANDROID
-		if (rtableid) {
-			if (setsockopt(s, IPPROTO_IP, SO_RTABLE, &rtableid,
-			    sizeof(rtableid)) == -1)
-				err(1, "setsockopt SO_RTABLE");
-		}
-#endif /* !ANDROID */
-
 #ifdef ANDROID
 		ret = setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &x, sizeof(x));
 #else
@@ -765,7 +600,7 @@ readwrite(int nfd)
 	int lfd = fileno(stdout);
 	int plen;
 
-	plen = jflag ? 16384 : 2048;
+	plen = 2048;
 
 	/* Setup Network FD */
 	pfd[0].fd = nfd;
@@ -856,7 +691,6 @@ atelnet(int nfd, unsigned char *buf, unsigned int size)
 void
 build_ports(char *p)
 {
-	const char *errstr;
 	char *n;
 	int hi, lo, cp;
 	int x = 0;
@@ -869,20 +703,8 @@ build_ports(char *p)
 		n++;
 
 		/* Make sure the ports are in order: lowest->highest. */
-#ifdef ANDROID
 		hi = atoi(n);
-#else
-		hi = strtonum(n, 1, PORT_MAX, &errstr);
-		if (errstr)
-			errx(1, "port number %s: %s", errstr, n);
-#endif
-#ifdef ANDROID
 		lo = atoi(p);
-#else
-		lo = strtonum(p, 1, PORT_MAX, &errstr);
-		if (errstr)
-			errx(1, "port number %s: %s", errstr, p);
-#endif
 
 		if (lo > hi) {
 			cp = hi;
@@ -898,7 +720,7 @@ build_ports(char *p)
 			snprintf(portlist[x], PORT_MAX_LEN, "%d", cp);
 			x++;
 		}
-
+#if 0
 		/* Randomly swap ports. */
 		if (rflag) {
 			int y;
@@ -911,14 +733,9 @@ build_ports(char *p)
 				portlist[y] = c;
 			}
 		}
-	} else {
-#ifdef ANDROID
-		hi = atoi(p);
-#else
-		hi = strtonum(p, 1, PORT_MAX, &errstr);
-		if (errstr)
-			errx(1, "port number %s: %s", errstr, p);
 #endif
+	} else {
+		hi = atoi(p);
 		portlist[0] = strdup(p);
 		if (portlist[0] == NULL)
 			err(1, NULL);
@@ -950,30 +767,11 @@ set_common_sockopts(int s)
 {
 	int x = 1;
 
-#ifndef ANDROID
-	if (Sflag) {
-		if (setsockopt(s, IPPROTO_TCP, TCP_MD5SIG,
-			&x, sizeof(x)) == -1)
-			err(1, NULL);
-	}
-#endif
 	if (Dflag) {
 		if (setsockopt(s, SOL_SOCKET, SO_DEBUG,
 			&x, sizeof(x)) == -1)
 			err(1, NULL);
 	}
-#ifndef ANDROID
-	if (jflag) {
-		if (setsockopt(s, SOL_SOCKET, SO_JUMBO,
-			&x, sizeof(x)) == -1)
-			err(1, NULL);
-	}
-	if (Tflag != -1) {
-		if (setsockopt(s, IPPROTO_IP, IP_TOS,
-		    &Tflag, sizeof(Tflag)) == -1)
-			err(1, "set IP ToS");
-	}
-#endif
 	if (Iflag) {
 		if (setsockopt(s, SOL_SOCKET, SO_RCVBUF,
 		    &Iflag, sizeof(Iflag)) == -1)
@@ -986,7 +784,6 @@ set_common_sockopts(int s)
 	}
 }
 
-#ifndef ANDROID
 int
 map_tos(char *s, int *val)
 {
@@ -1008,14 +805,14 @@ map_tos(char *s, int *val)
 		{ "af42",		IPTOS_DSCP_AF42 },
 		{ "af43",		IPTOS_DSCP_AF43 },
 		{ "critical",		IPTOS_PREC_CRITIC_ECP },
-		{ "cs0",		IPTOS_DSCP_CS0 },
-		{ "cs1",		IPTOS_DSCP_CS1 },
-		{ "cs2",		IPTOS_DSCP_CS2 },
-		{ "cs3",		IPTOS_DSCP_CS3 },
-		{ "cs4",		IPTOS_DSCP_CS4 },
-		{ "cs5",		IPTOS_DSCP_CS5 },
-		{ "cs6",		IPTOS_DSCP_CS6 },
-		{ "cs7",		IPTOS_DSCP_CS7 },
+		{ "cs0",		IPTOS_CLASS_CS0 },
+		{ "cs1",		IPTOS_CLASS_CS1 },
+		{ "cs2",		IPTOS_CLASS_CS2 },
+		{ "cs3",		IPTOS_CLASS_CS3 },
+		{ "cs4",		IPTOS_CLASS_CS4 },
+		{ "cs5",		IPTOS_CLASS_CS5 },
+		{ "cs6",		IPTOS_CLASS_CS6 },
+		{ "cs7",		IPTOS_CLASS_CS7 },
 		{ "ef",			IPTOS_DSCP_EF },
 		{ "inetcontrol",	IPTOS_PREC_INTERNETCONTROL },
 		{ "lowdelay",		IPTOS_LOWDELAY },
@@ -1034,7 +831,6 @@ map_tos(char *s, int *val)
 
 	return (0);
 }
-#endif
 
 void
 help(void)
@@ -1054,11 +850,6 @@ help(void)
 	\t-O length	TCP send buffer length\n\
 	\t-P proxyuser\tUsername for proxy authentication\n\
 	\t-p port\t	Specify local port for remote connects\n\
-	\t-r		Randomize remote ports\n\
-	\t-S		Enable the TCP MD5 signature option\n\
-	\t-s addr\t	Local source address\n\
-	\t-T toskeyword\tSet IP Type of Service\n\
-	\t-t		Answer TELNET negotiation\n\
 	\t-U		Use UNIX domain socket\n\
 	\t-u		UDP mode\n\
 	\t-V rtable	Specify alternate routing table\n\
@@ -1075,10 +866,10 @@ void
 usage(int ret)
 {
 	fprintf(stderr,
-	    "usage: nc [-46DdhklnrStUuvz] [-I length] [-i interval] [-O length]\n"
-	    "\t  [-P proxy_username] [-p source_port] [-s source] [-T ToS]\n"
+	    "usage: nc [-46DdhklnUuvz] [-I length] [-i interval] [-O length]\n"
+	    "\t  [-P proxy_username] [-p source_port]\n"
 	    "\t  [-V rtable] [-w timeout] [-X proxy_protocol]\n"
-	    "\t  [-x proxy_address[:port]] [destination] [port]\n");
+	    "\t  [destination] [port]\n");
 	if (ret)
 		exit(1);
 }
