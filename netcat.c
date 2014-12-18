@@ -65,16 +65,13 @@
 #define UNIX_DG_TMP_SOCKET_SIZE	19
 
 /* Command Line Options */
-int	dflag;					/* detached, no stdin */
 unsigned int iflag;				/* Interval Flag */
 int	kflag;					/* More than one connect */
 int	lflag;					/* Bind to local port */
 int	nflag;					/* Don't do name look up */
 char   *Pflag;					/* Proxy username */
 char   *pflag;					/* Localport flag */
-int	rflag;					/* Random ports flag */
 char   *sflag;					/* Source Address */
-int	tflag;					/* Telnet Emulation */
 int	uflag;					/* UDP - Default to TCP */
 int	vflag;					/* Verbosity */
 int	zflag;					/* Port Scan Flag */
@@ -87,7 +84,6 @@ int family = AF_UNSPEC;
 char *portlist[PORT_MAX+1];
 char *unix_dg_tmp_socket;
 
-void	atelnet(int, unsigned char *, unsigned int);
 void	build_ports(char *);
 void	help(void);
 int	local_listen(char *, char *, struct addrinfo);
@@ -123,7 +119,7 @@ main(int argc, char *argv[])
 	sv = NULL;
 
 	while ((ch = getopt(argc, argv,
-	    "46DdhI:i:jklnO:P:p:rSs:tT:UuV:vw:X:x:z")) != -1) {
+	    "46DhI:i:klnO:P:p:Ss:T:UuV:vw:X:x:z")) != -1) {
 		switch (ch) {
 		case '4':
 			family = AF_INET;
@@ -133,9 +129,6 @@ main(int argc, char *argv[])
 			break;
 		case 'U':
 			family = AF_UNIX;
-			break;
-		case 'd':
-			dflag = 1;
 			break;
 		case 'h':
 			help();
@@ -158,14 +151,8 @@ main(int argc, char *argv[])
 		case 'p':
 			pflag = optarg;
 			break;
-		case 'r':
-			rflag = 1;
-			break;
 		case 's':
 			sflag = optarg;
-			break;
-		case 't':
-			tflag = 1;
 			break;
 		case 'u':
 			uflag = 1;
@@ -359,7 +346,7 @@ main(int argc, char *argv[])
 	exit(ret);
 }
 
-/* 16KHz very long wav header */
+/* 48KHz very long wav header */
 void writewavheader()
 {
 	char wavhead[] = {
@@ -607,28 +594,21 @@ local_listen(char *host, char *port, struct addrinfo hints)
 void
 readwrite(int nfd)
 {
-	struct pollfd pfd[2];
+	struct pollfd pfd;
 	unsigned char buf[16384];
-	int n, wfd = fileno(stdin);
 	int lfd = fileno(stdout);
-	int plen;
+	int n, plen;
 
-	plen = 2048;
+	plen = 4096;
 
 	/* Setup Network FD */
-	pfd[0].fd = nfd;
-	pfd[0].events = POLLIN;
-
-	/* Set up STDIN FD. */
-	pfd[1].fd = wfd;
-	pfd[1].events = POLLIN;
+	pfd.fd = nfd;
+	pfd.events = POLLIN;
 
 	writewavheader();
-	while (pfd[0].fd != -1) {
-		if (iflag)
-			sleep(iflag);
+	while (pfd.fd != -1) {
 
-		if ((n = poll(pfd, 2 - dflag, timeout)) < 0) {
+		if ((n = poll(&pfd, 1, timeout)) < 0) {
 			close(nfd);
 			err(1, "Polling Error");
 		}
@@ -636,64 +616,19 @@ readwrite(int nfd)
 		if (n == 0)
 			return;
 
-		if (pfd[0].revents & POLLIN) {
+		if (pfd.revents & POLLIN) {
 			if ((n = read(nfd, buf, plen)) < 0)
 				return;
 			else if (n == 0) {
 				shutdown(nfd, SHUT_RD);
-				pfd[0].fd = -1;
-				pfd[0].events = 0;
+				pfd.fd = -1;
+				pfd.events = 0;
 			} else {
-				if (tflag)
-					atelnet(nfd, buf, n);
 				if (atomicio(vwrite, lfd, buf, n) != n)
 					return;
 			}
 		}
 
-		if (!dflag && pfd[1].revents & POLLIN) {
-			if ((n = read(wfd, buf, plen)) < 0)
-				return;
-			else if (n == 0) {
-				shutdown(nfd, SHUT_WR);
-				pfd[1].fd = -1;
-				pfd[1].events = 0;
-			} else {
-				if (atomicio(vwrite, nfd, buf, n) != n)
-					return;
-			}
-		}
-	}
-}
-
-/* Deal with RFC 854 WILL/WONT DO/DONT negotiation. */
-void
-atelnet(int nfd, unsigned char *buf, unsigned int size)
-{
-	unsigned char *p, *end;
-	unsigned char obuf[4];
-
-	if (size < 3)
-		return;
-	end = buf + size - 2;
-
-	for (p = buf; p < end; p++) {
-		if (*p != IAC)
-			continue;
-
-		obuf[0] = IAC;
-		p++;
-		if ((*p == WILL) || (*p == WONT))
-			obuf[1] = DONT;
-		else if ((*p == DO) || (*p == DONT))
-			obuf[1] = WONT;
-		else
-			continue;
-
-		p++;
-		obuf[2] = *p;
-		if (atomicio(vwrite, nfd, obuf, 3) != 3)
-			warn("Write Error!");
 	}
 }
 
@@ -734,20 +669,6 @@ build_ports(char *p)
 			snprintf(portlist[x], PORT_MAX_LEN, "%d", cp);
 			x++;
 		}
-#if 0
-		/* Randomly swap ports. */
-		if (rflag) {
-			int y;
-			char *c;
-
-			for (x = 0; x <= (hi - lo); x++) {
-				y = (arc4random() & 0xFFFF) % (hi - lo);
-				c = portlist[x];
-				portlist[x] = portlist[y];
-				portlist[y] = c;
-			}
-		}
-#endif
 	} else {
 		hi = atoi(p);
 		portlist[0] = strdup(p);
@@ -854,7 +775,6 @@ help(void)
 	\t-4		Use IPv4\n\
 	\t-6		Use IPv6\n\
 	\t-D		Enable the debug socket option\n\
-	\t-d		Detach from stdin\n\
 	\t-h		This help text\n\
 	\t-I length	TCP receive buffer length\n\
 	\t-i secs\t	Delay interval for lines sent, ports scanned\n\
@@ -880,10 +800,7 @@ void
 usage(int ret)
 {
 	fprintf(stderr,
-	    "usage: nc [-46DdhklnUuvz] [-I length] [-i interval] [-O length]\n"
-	    "\t  [-P proxy_username] [-p source_port]\n"
-	    "\t  [-V rtable] [-w timeout] [-X proxy_protocol]\n"
-	    "\t  [destination] [port]\n");
+	    "usage: wavcat [-46DhklnUuvz]  [host] [port]\n");
 	if (ret)
 		exit(1);
 }
