@@ -52,24 +52,16 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <limits.h>
+
 #include "atomicio.h"
 
-#ifndef SUN_LEN
-#define SUN_LEN(su) \
-	(sizeof(*(su)) - sizeof((su)->sun_path) + strlen((su)->sun_path))
-#endif
-
-#define PORT_MAX_LEN	6
-#define UNIX_DG_TMP_SOCKET_SIZE	19
 
 int uflag = 0;					/* UDP - Default to TCP */
 int timeout = -1;
 int family = AF_UNSPEC;
-char *unix_dg_tmp_socket;
 
-void	build_ports(char *);
 void	help(void);
-void	readwrite(int);
+void	readport(int);
 int	remote_connect(const char *, const char *, struct addrinfo);
 int	timeout_connect(int, const struct sockaddr *, socklen_t);
 void	usage(int);
@@ -123,11 +115,12 @@ main(int argc, char *argv[])
 		hints.ai_family = family;
 		hints.ai_socktype = uflag ? SOCK_DGRAM : SOCK_STREAM;
 		hints.ai_protocol = uflag ? IPPROTO_UDP : IPPROTO_TCP;
+		hints.ai_flags = AI_PASSIVE;
 	}
 
 	s = remote_connect(host, uport, hints);
 	if (s >= 0) {
-		readwrite(s);
+		readport(s);
 		close(s);
 	}
 	exit( 0 );
@@ -167,9 +160,12 @@ remote_connect(const char *host, const char *port, struct addrinfo hints)
 
 	res0 = res;
 	do {
-		if ((s = socket(res0->ai_family, res0->ai_socktype,
-		    res0->ai_protocol)) < 0)
+		s = socket(res0->ai_family, res0->ai_socktype, res0->ai_protocol);
+		if (s < 0)
 			continue;
+
+		if (uflag && bind(s, (struct sockaddr *)res0->ai_addr, res0->ai_addrlen) < 0)
+			errx(1, "bind failed: %s", strerror(errno));
 
 		if (timeout_connect(s, res0->ai_addr, res0->ai_addrlen) == 0)
 			break;
@@ -221,11 +217,11 @@ timeout_connect(int s, const struct sockaddr *name, socklen_t namelen)
 }
 
 /*
- * readwrite()
+ * readport()
  * Loop that polls on the network file descriptor
  */
 void
-readwrite(int nfd)
+readport(int nfd)
 {
 	struct pollfd pfd;
 	unsigned char buf[16384];
