@@ -62,6 +62,7 @@ int family = AF_UNSPEC;
 
 void	help(void);
 void	readport(int);
+int	udp_listen(const char *host, const char *port, struct addrinfo hints);
 int	remote_connect(const char *, const char *, struct addrinfo);
 int	timeout_connect(int, const struct sockaddr *, socklen_t);
 void	usage(int);
@@ -115,10 +116,12 @@ main(int argc, char *argv[])
 		hints.ai_family = family;
 		hints.ai_socktype = uflag ? SOCK_DGRAM : SOCK_STREAM;
 		hints.ai_protocol = uflag ? IPPROTO_UDP : IPPROTO_TCP;
-		hints.ai_flags = AI_PASSIVE;
 	}
 
-	s = remote_connect(host, uport, hints);
+	if (uflag)
+		s = udp_listen(host, uport, hints);
+	else
+		s = remote_connect(host, uport, hints);
 	if (s >= 0) {
 		readport(s);
 		close(s);
@@ -144,16 +147,34 @@ void writewavheader()
 	atomicio(vwrite, fileno(stdout), wavhead, sizeof(wavhead));
 }
 
-/*
- * remote_connect()
- * Returns a socket connected to a remote host. Properly binds to a local
- * port or source address if needed. Returns -1 on failure.
- */
+int
+udp_listen(const char *host, const char *port, struct addrinfo hints)
+{
+	int rv, plen, s;
+	char buf[16384];
+	struct sockaddr_storage z;
+	socklen_t len = sizeof(z);
+
+	plen = 2048;
+	hints.ai_flags = AI_PASSIVE;
+	s = remote_connect(host, port, hints);
+	if (s < 0)
+		err(1, NULL);
+
+	rv = recvfrom(s, buf, plen, MSG_PEEK,
+			(struct sockaddr *)&z, &len);
+	if (rv < 0)
+		err(1, "recvfrom");
+	rv = connect(s, (struct sockaddr *)&z, len);
+
+	return (s);
+}
+
 int
 remote_connect(const char *host, const char *port, struct addrinfo hints)
 {
 	struct addrinfo *res, *res0;
-	int s, error;
+	int s, error, ret, x;
 
 	if ((error = getaddrinfo(host, port, &hints, &res)))
 		errx(1, "getaddrinfo: %s", gai_strerror(error));
@@ -164,12 +185,17 @@ remote_connect(const char *host, const char *port, struct addrinfo hints)
 		if (s < 0)
 			continue;
 
-		if (uflag && bind(s, (struct sockaddr *)res0->ai_addr, res0->ai_addrlen) < 0)
-			errx(1, "bind failed: %s", strerror(errno));
-
-		if (timeout_connect(s, res0->ai_addr, res0->ai_addrlen) == 0)
-			break;
-
+		if (uflag) {
+			x = 1;
+			ret = setsockopt(s, SOL_SOCKET, SO_REUSEPORT, &x, sizeof(x));
+			if (ret == -1)
+				errx(1, "UDP Port: SetSockOpt failed.");
+			if (bind(s, (struct sockaddr *)res0->ai_addr, res0->ai_addrlen) == 0)
+				break;
+		} else {
+			if (timeout_connect(s, res0->ai_addr, res0->ai_addrlen) == 0)
+				break;
+		}
 		close(s);
 		s = -1;
 	} while ((res0 = res0->ai_next) != NULL);
