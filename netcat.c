@@ -62,7 +62,6 @@ int family = AF_UNSPEC;
 
 void	help(void);
 void	readport(int);
-int	udp_listen(const char *host, const char *port, struct addrinfo hints);
 int	remote_connect(const char *, const char *, struct addrinfo);
 int	timeout_connect(int, const struct sockaddr *, socklen_t);
 void	usage(int);
@@ -118,10 +117,7 @@ main(int argc, char *argv[])
 		hints.ai_protocol = uflag ? IPPROTO_UDP : IPPROTO_TCP;
 	}
 
-	if (uflag)
-		s = udp_listen(host, uport, hints);
-	else
-		s = remote_connect(host, uport, hints);
+	s = remote_connect(host, uport, hints);
 	if (s >= 0) {
 		readport(s);
 		close(s);
@@ -148,33 +144,13 @@ void writewavheader()
 }
 
 int
-udp_listen(const char *host, const char *port, struct addrinfo hints)
-{
-	int rv, plen, s;
-	char buf[16384];
-	struct sockaddr_storage z;
-	socklen_t len = sizeof(z);
-
-	plen = 2048;
-	hints.ai_flags = AI_PASSIVE;
-	s = remote_connect(host, port, hints);
-	if (s < 0)
-		err(1, NULL);
-
-	rv = recvfrom(s, buf, plen, MSG_PEEK,
-			(struct sockaddr *)&z, &len);
-	if (rv < 0)
-		err(1, "recvfrom");
-	rv = connect(s, (struct sockaddr *)&z, len);
-
-	return (s);
-}
-
-int
 remote_connect(const char *host, const char *port, struct addrinfo hints)
 {
 	struct addrinfo *res, *res0;
 	int s, error, ret, x;
+
+	if (uflag)
+		hints.ai_flags = AI_PASSIVE;
 
 	if ((error = getaddrinfo(host, port, &hints, &res)))
 		errx(1, "getaddrinfo: %s", gai_strerror(error));
@@ -252,13 +228,22 @@ readport(int nfd)
 	struct pollfd pfd;
 	unsigned char buf[16384];
 	int lfd = fileno(stdout);
-	int n, plen;
+	int n, plen, rv;
+	struct  sockaddr_storage z;
+	socklen_t len = sizeof(z);
 
 	plen = 4096;
 
 	/* Setup Network FD */
 	pfd.fd = nfd;
 	pfd.events = POLLIN;
+
+	if (uflag) {
+		rv = recvfrom(nfd, buf, plen, MSG_PEEK, (struct sockaddr *)&z, &len);
+		if (rv < 0)
+			return;
+		rv = connect(nfd, (struct sockaddr *)&z, len);
+	}
 
 	writewavheader();
 	while (pfd.fd != -1) {
@@ -295,7 +280,9 @@ help(void)
 	\t-4		Use IPv4\n\
 	\t-6		Use IPv6\n\
 	\t-h		This help text\n\
-	\t-u		UDP mode\n");
+	\t-u		UDP mode\n\n\
+	 for udp :\twavcat -u 9999\n\
+	 for tcp :\twavcat localhost 9999\n");
 	exit(1);
 }
 
